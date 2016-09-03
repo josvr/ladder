@@ -18,7 +18,7 @@ import theano
 from theano.tensor.type import TensorType
 
 from blocks.algorithms import GradientDescent, Adam
-from blocks.extensions import FinishAfter
+from blocks.extensions import FinishAfter,ProgressBar
 from blocks.extensions.monitoring import TrainingDataMonitoring
 from blocks.filter import VariableFilter
 from blocks.graph import ComputationGraph
@@ -27,7 +27,7 @@ from blocks.model import Model
 from blocks.roles import PARAMETER
 from fuel.datasets import MNIST, CIFAR10
 from Jos import JOS
-from fuel.schemes import ShuffledScheme, SequentialScheme
+from fuel.schemes import ConstantScheme,ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
 from fuel.transformers import Transformer
 
@@ -82,8 +82,8 @@ class SemiDataStream(Transformer):
         to avoid collision. Upon iteration, the first one is repeated until
         the second one depletes.
         """
-    def __init__(self, data_stream_labeled, data_stream_unlabeled, **kwargs):
-        super(Transformer, self).__init__(**kwargs)
+    def __init__(self, data_stream_labeled, data_stream_unlabeled, iteration_scheme,**kwargs):
+        super(Transformer, self).__init__(iteration_scheme=iteration_scheme,**kwargs)
         self.ds_labeled = data_stream_labeled
         self.ds_unlabeled = data_stream_unlabeled
         # Rename the sources for clarity
@@ -173,7 +173,7 @@ def make_datastream(dataset, indices, batch_size,
         data_stream_unlabeled=Whitening(
             DataStream(dataset),
             iteration_scheme=scheme(i_unlabeled, batch_size),
-            whiten=whiten, cnorm=cnorm)
+            whiten=whiten, cnorm=cnorm),iteration_scheme=ConstantScheme(batch_size,num_examples=n_unlabeled,times=None)
     )
     return ds
 
@@ -512,6 +512,7 @@ def train(cli_params):
             SaveLog(p.save_dir, after_training=True),
             #ShortPrinting(short_prints),
             StopAfterNoImprovementValidation('valid_error_error_rate_clean',10),
+            ProgressBar()
             #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
             #        after_epoch=True),
         ])
