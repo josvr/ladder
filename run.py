@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 
+from StopAfter10Scn import StopAfterNoImprovement
+from fuel.utils import find_in_data_path
+from fuel.datasets import H5PYDataset
 import functools
 import logging
 import os
@@ -23,6 +26,7 @@ from blocks.main_loop import MainLoop
 from blocks.model import Model
 from blocks.roles import PARAMETER
 from fuel.datasets import MNIST, CIFAR10
+from Jos import JOS
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
 from fuel.transformers import Transformer
@@ -39,7 +43,6 @@ from nn import ApproxTestMonitoring, FinalTestMonitoring, TestMonitoring
 from nn import LRDecay
 from ladder import LadderAE
 
-
 class Whitening(Transformer):
     """ Makes a copy of the examples in the underlying dataset and whitens it
         if necessary.
@@ -49,26 +52,29 @@ class Whitening(Transformer):
         super(Whitening, self).__init__(data_stream,
                                         iteration_scheme=iteration_scheme,
                                         **kwargs)
-        data = data_stream.get_data(slice(data_stream.dataset.num_examples))
-        self.data = []
-        for s, d in zip(self.sources, data):
-            if 'features' == s:
-                # Fuel provides Cifar in uint8, convert to float32
-                d = numpy.require(d, dtype=numpy.float32)
-                if cnorm is not None:
-                    d = cnorm.apply(d)
-                if whiten is not None:
-                    d = whiten.apply(d)
-                self.data += [d]
-            elif 'targets' == s:
-                d = unify_labels(d)
-                self.data += [d]
-            else:
-                raise Exception("Unsupported Fuel target: %s" % s)
+        self.cnorm = cnorm
+        self.whiten = whiten
+        self.data_stream = data_stream
 
     def get_data(self, request=None):
-        return (s[request] for s in self.data)
-
+        dret = self.data_stream.get_data(request)
+        data = []
+        for s, d in zip(self.sources, dret):
+            if 'features' == s or 'features_labeled' == s or 'features_unlabeled' == s:
+                # Fuel provides Cifar in uint8, convert to float32
+                d = numpy.require(d, dtype=numpy.float32)
+                if self.cnorm is not None:
+                    d = self.cnorm.apply(d)
+                if self.whiten is not None:
+                    d = self.whiten.apply(d)
+                data += [d]
+            elif 'targets' == s or 'targets_labeled' == s:
+                d = unify_labels(d)
+                data += [d]
+            else:
+                raise Exception("Unsupported Fuel target: %s" % s)
+        del dret
+        return data
 
 class SemiDataStream(Transformer):
     """ Combines two datastreams into one such that 'target' source (labels)
@@ -229,10 +235,13 @@ def load_and_log_params(cli_params):
 
 
 def setup_data(p, test_set=False):
-    dataset_class, training_set_size = {
-        'cifar10': (CIFAR10, 40000),
-        'mnist': (MNIST, 50000),
+    dataset_class = {
+        'cifar10': (CIFAR10),
+        'jos' : (JOS),
+        'mnist': (MNIST),
     }[p.dataset]
+
+    training_set_size = p.unlabeled_samples 
 
     # Allow overriding the default from command line
     if p.get('unlabeled_samples') is not None:
@@ -269,7 +278,13 @@ def setup_data(p, test_set=False):
         d.test_ind = numpy.arange(d.test.num_examples)
 
     # Setup optional whitening, only used for Cifar-10
-    in_dim = train_set.data_sources[train_set.sources.index('features')].shape[1:]
+    fn = find_in_data_path(train_set.filename)
+    #iprint(fn)
+    s1 = H5PYDataset(fn, ("train",))
+    handle = s1.open()
+    in_dim =  s1.get_data(handle,slice(0,1))[0].shape[1:]
+    s1.close(handle)
+    #in_dim = train_set.data_sources[train_set.sources.index('features')].shape[1:]
     if len(in_dim) > 1 and p.whiten_zca > 0:
         assert numpy.product(in_dim) == p.whiten_zca, \
             'Need %d whitening dimensions, not %d' % (numpy.product(in_dim),
@@ -299,7 +314,7 @@ def get_error(args):
 
     targets, acts = analyze(args)
     guess = numpy.argmax(acts, axis=1)
-    correct = numpy.sum(numpy.equal(guess, targets.flatten()))
+    correct = numpy.sum(numpy.equal(guess, targets))
 
     return (1. - correct / float(len(guess))) * 100.
 
@@ -373,20 +388,21 @@ def analyze(cli_params):
 
     it = ds.get_epoch_iterator(as_dict=True)
     res = []
-    inputs = {'features_labeled': [],
-              'targets_labeled': [],
-              'features_unlabeled': []}
+    inputs = {
+              'targets_labeled': []
+              }
     # Loop over one epoch
     for d in it:
         # Store all inputs
         for k, v in d.iteritems():
-            inputs[k] += [v]
+            if k in inputs: 
+               inputs[k] += [v]
         # Store outputs
         res += [f(*[d[str(inp)] for inp in cg.inputs])]
 
     # Concatenate all minibatches
     res = [numpy.vstack(minibatches) for minibatches in zip(*res)]
-    inputs = {k: numpy.vstack(v) for k, v in inputs.iteritems()}
+    inputs = {k: numpy.hstack(v) for k, v in list(inputs.items())}
 
     return inputs['targets_labeled'], res[0]
 
@@ -435,10 +451,10 @@ def train(cli_params):
             ('V_E', ladder.error.clean),
             ('V_C_de', ladder.costs.denois.values()),
         ]),
-        "valid_final": OrderedDict([
-            ('VF_C_class', ladder.costs.class_clean),
-            ('VF_E', ladder.error.clean),
-            ('VF_C_de', ladder.costs.denois.values()),
+        "valid_error": OrderedDict([
+            ('VE_C_class', ladder.costs.class_clean),
+            ('VE_E', ladder.error.clean),
+            ('VE_C_de', ladder.costs.denois.values()),
         ]),
     }
 
@@ -458,13 +474,13 @@ def train(cli_params):
             # This will estimate the validation error using
             # running average estimates of the batch normalization
             # parameters, mean and variance
-            ApproxTestMonitoring(
-                [ladder.costs.class_clean, ladder.error.clean]
-                + ladder.costs.denois.values(),
-                make_datastream(data.valid, data.valid_ind,
-                                p.valid_batch_size, whiten=whiten, cnorm=cnorm,
-                                scheme=ShuffledScheme),
-                prefix="valid_approx"),
+            #ApproxTestMonitoring(
+            #    [ladder.costs.class_clean, ladder.error.clean]
+            #    + ladder.costs.denois.values(),
+            #    make_datastream(data.valid, data.valid_ind,
+            #                    p.valid_batch_size, whiten=whiten, cnorm=cnorm,
+            #                    scheme=ShuffledScheme),
+            #    prefix="valid_approx"),
 
             # This Monitor is slower, but more accurate since it will first
             # estimate batch normalization parameters from training data and
@@ -482,8 +498,8 @@ def train(cli_params):
                                 n_labeled=len(data.valid_ind),
                                 whiten=whiten, cnorm=cnorm,
                                 scheme=ShuffledScheme),
-                prefix="valid_final",
-                after_n_epochs=p.num_epochs),
+                prefix="valid_error",
+                every_n_epochs=1),
 
             TrainingDataMonitoring(
                 [ladder.costs.total, ladder.costs.class_corr,
@@ -495,14 +511,15 @@ def train(cli_params):
             SaveExpParams(p, p.save_dir, before_training=True),
             SaveLog(p.save_dir, after_training=True),
             ShortPrinting(short_prints),
-            LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
-                    after_epoch=True),
+            StopAfterNoImprovement(short_prints),
+            #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
+            #        after_epoch=True),
         ])
     main_loop.run()
 
     # Get results
     df = DataFrame.from_dict(main_loop.log, orient='index')
-    col = 'valid_final_error_rate_clean'
+    col = 'valid_error_error_rate_clean'
     logger.info('%s %g' % (col, df[col].iloc[-1]))
 
     if main_loop.log.status['epoch_interrupt_received']:
@@ -563,7 +580,7 @@ if __name__ == "__main__":
         a("--unlabeled-samples", help="How many unsupervised samples are used",
           type=int, default=default(None), nargs='+')
         a("--dataset", type=str, default=default(['mnist']), nargs='+',
-          choices=['mnist', 'cifar10'], help="Which dataset to use")
+          choices=['mnist', 'cifar10','jos'], help="Which dataset to use")
         a("--lr", help="Initial learning rate",
           type=float, default=default([0.002]), nargs='+')
         a("--lrate-decay", help="When to linearly start decaying lrate (0-1)",
