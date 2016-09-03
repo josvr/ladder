@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from StopAfter10Scn import StopAfterNoImprovement
+from StopAfterNoImprovementValidation import StopAfterNoImprovementValidation
 from fuel.utils import find_in_data_path
 from fuel.datasets import H5PYDataset
 import functools
@@ -469,7 +469,7 @@ def train(cli_params):
                         cnorm=cnorm),
         model=Model(ladder.costs.total),
         extensions=[
-            FinishAfter(after_n_epochs=p.num_epochs),
+            #FinishAfter(after_n_epochs=p.num_epochs),
 
             # This will estimate the validation error using
             # running average estimates of the batch normalization
@@ -510,8 +510,8 @@ def train(cli_params):
             SaveParams(None, all_params, p.save_dir, after_epoch=True),
             SaveExpParams(p, p.save_dir, before_training=True),
             SaveLog(p.save_dir, after_training=True),
-            ShortPrinting(short_prints),
-            StopAfterNoImprovement(short_prints),
+            #ShortPrinting(short_prints),
+            StopAfterNoImprovementValidation('valid_error_error_rate_clean',10),
             #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
             #        after_epoch=True),
         ])
