@@ -513,7 +513,7 @@ def train(cli_params):
             #SaveLog(p.save_dir, after_training=True),
             #ShortPrinting(short_prints),
             #ProgressBar(),
-            StopAfterNoImprovementValidation('valid_error_error_rate_clean',2,all_params,p,p.save_dir),
+            StopAfterNoImprovementValidation('valid_error_error_rate_clean',10,all_params,p,p.save_dir),
             #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
             #        after_epoch=True),
         ])
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         default = lambda x: x if use_defaults else None
 
         # General hyper parameters and settings
-        a("save_to", help="Destination to save the state and results",
+        a("--save_to", help="Destination to save the state and results",
           default=default("noname"), nargs="?")
         a("--num-epochs", help="Number of training epochs",
           type=int, default=default(150))
