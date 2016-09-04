@@ -317,7 +317,7 @@ def get_error(args):
     targets, acts = analyze(args)
     guess = numpy.argmax(acts, axis=1)
     correct = numpy.sum(numpy.equal(guess, targets))
-
+    print("LEN GUESS "+str(len(guess)))
     return (1. - correct / float(len(guess))) * 100.
 
 
@@ -509,12 +509,12 @@ def train(cli_params):
                 + ladder.costs.denois.values(),
                 prefix="train", after_epoch=True),
 
-            SaveParams(None, all_params, p.save_dir, after_epoch=True),
-            SaveExpParams(p, p.save_dir, before_training=True),
-            SaveLog(p.save_dir, after_training=True),
+            #SaveParams(None, all_params, p.save_dir, after_epoch=True),
+            #SaveExpParams(p, p.save_dir, before_training=True),
+            #SaveLog(p.save_dir, after_training=True),
             #ShortPrinting(short_prints),
-            ProgressBar(),
-            StopAfterNoImprovementValidation('valid_error_error_rate_clean',10),
+            #ProgressBar(),
+            StopAfterNoImprovementValidation('valid_error_error_rate_clean',2,all_params,p,p.save_dir),
             #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
             #        after_epoch=True),
         ])
