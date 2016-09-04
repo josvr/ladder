@@ -317,7 +317,6 @@ def get_error(args):
     targets, acts = analyze(args)
     guess = numpy.argmax(acts, axis=1)
     correct = numpy.sum(numpy.equal(guess, targets))
-    print("LEN GUESS "+str(len(guess)))
     return (1. - correct / float(len(guess))) * 100.
 
 

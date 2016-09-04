@@ -291,6 +291,7 @@ class LadderAE():
             'linear': lambda x: x,
             'softplus': lambda x: T.log(1. + T.exp(x)),
             'sigmoid': lambda x: T.nnet.sigmoid(x),
+            'tanh': lambda x: T.tanh(x),
             'softmax': lambda x: softmax_n(x),
         }.get(act_name)
         assert act, 'unknown act %s' % act_name
