@@ -14,7 +14,6 @@ class StopAfterNoImprovementValidation(Printing):
 
     def do(self, which_callback, *args):
         log = self.main_loop.log
-        print("TEST "+str(self.main_loop.data_stream.iteration_scheme.__class__.__name__))
         iteration = log.status['epochs_done']
         if iteration == 0:
            return

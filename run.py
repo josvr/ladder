@@ -146,6 +146,8 @@ def make_datastream(dataset, indices, batch_size,
         n_unlabeled = len(indices)
     assert n_labeled <= n_unlabeled, 'need less labeled than unlabeled'
 
+    balanced_classes = False
+
     if balanced_classes and n_labeled < n_unlabeled:
         # Ensure each label is equally represented
         logger.info('Balancing %d labels...' % n_labeled)
@@ -511,8 +513,8 @@ def train(cli_params):
             SaveExpParams(p, p.save_dir, before_training=True),
             SaveLog(p.save_dir, after_training=True),
             #ShortPrinting(short_prints),
+            ProgressBar(),
             StopAfterNoImprovementValidation('valid_error_error_rate_clean',10),
-            ProgressBar()
             #LRDecay(ladder.lr, p.num_epochs * p.lrate_decay, p.num_epochs,
             #        after_epoch=True),
         ])
